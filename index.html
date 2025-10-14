@@ -1,0 +1,174 @@
+<!doctype html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Love Quest — index</title>
+  <style>
+    html,body{height:100%;margin:0;background:#0b1020;font-family:Inter, system-ui, sans-serif}
+    #gameWrap{display:flex;align-items:center;justify-content:center;height:100%;padding:18px}
+    canvas{background:linear-gradient(#ffb37a,#8fb0ff);border-radius:12px;box-shadow:0 20px 40px rgba(0,0,0,.35)}
+
+    .hud{position:fixed;left:16px;top:12px;background:rgba(255,255,255,.95);padding:8px 12px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.12);font-weight:700;z-index:20}
+    .hint{position:fixed;right:16px;top:12px;background:rgba(255,255,255,.95);padding:8px 12px;border-radius:10px;box-shadow:0 8px 20px rgba(0,0,0,.06);z-index:20}
+
+    .touch-controls{position:fixed;left:12px;bottom:12px;display:flex;gap:8px;align-items:center;z-index:20}
+    .btn{width:64px;height:64px;border-radius:12px;background:rgba(255,255,255,.95);box-shadow:0 10px 30px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;font-size:24px;user-select:none;touch-action:manipulation}
+    .btn.small{width:56px;height:56px}
+    .jump-wrap{position:fixed;right:12px;bottom:20px;z-index:20}
+
+    .overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:50}
+    .card{width:92%;max-width:760px;background:#fff;border-radius:16px;padding:18px;box-shadow:0 24px 60px rgba(0,0,0,.28);text-align:center;pointer-events:auto;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.98);opacity:0;transition:all .25s ease}
+    .card.show{opacity:1;transform:translate(-50%,-50%) scale(1)}
+    .finalPhoto{width:220px;height:220px;border-radius:14px;object-fit:cover;display:block;margin:14px auto}
+    button.primary{background:#ff6b8a;border:none;color:#fff;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer}
+    .levelBtn{background:#fff;border:2px solid #eee;padding:10px 14px;border-radius:10px;cursor:pointer}
+    .menuList{display:flex;gap:12px;justify-content:center;margin:14px 0;flex-wrap:wrap}
+    .hearts{display:inline-flex;gap:6px;vertical-align:middle}
+
+    @media (max-width:640px){.btn{width:56px;height:56px}}
+  </style>
+</head>
+<body>
+  <div id="gameWrap"><canvas id="game" width="900" height="520"></canvas></div>
+
+  <div class="hud" id="hud">Уровень: <span id="levelNum">1</span> — <span class="hearts" id="lifeDisplay">❤❤❤</span> — ❤️ <span id="col">0</span>/<span id="colGoal">5</span></div>
+  <div class="hint">← → пробел / ↑ — движение и прыжок</div>
+
+  <div class="touch-controls"><div class="btn" id="leftBtn">◀</div><div class="btn" id="rightBtn">▶</div></div>
+  <div class="jump-wrap"><div class="btn small" id="jumpBtn">⤴</div></div>
+
+  <div class="overlay">
+    <div class="card" id="menuCard"><h1>Love Quest</h1><p>Выбирай уровень (открываются по мере прохождения):</p><div class="menuList" id="levelsList"></div><button class="primary" id="startBtn">Начать с начала</button></div>
+
+    <div class="card" id="levelCompleteCard" style="display:none"><h1>Уровень пройден!</h1><p>Молодец — хочешь перейти дальше или в меню?</p><div style="display:flex;gap:10px;justify-content:center;margin-top:12px"><button class="primary" id="nextBtn">Далее ▶</button><button class="levelBtn" id="backToMenu">В меню</button></div></div>
+
+    <div class="card" id="lostCard" style="display:none"><h1>Ты проиграл</h1><p>Не беда — попробовать снова?</p><div style="display:flex;gap:10px;justify-content:center;margin-top:12px"><button class="primary" id="retryBtn">Попробовать снова</button><button class="levelBtn" id="lostToMenu">В меню</button></div></div>
+
+    <div class="card" id="finalCard" style="display:none"><h1>Ты прошла все уровни!</h1><img src="photo.jpg" alt="Фото" class="finalPhoto"><p>Я не знаю, как объяснить, но каждый день с тобой — мой лучший уровень ❤️</p><button class="primary" id="replayBtn">Играть снова</button></div>
+  </div>
+
+  <audio id="music" src="music.mp3" preload="auto"></audio>
+
+  <script>
+  // Robust single-file index with fixes requested
+  const canvas=document.getElementById('game');const ctx=canvas.getContext('2d');const W=canvas.width,H=canvas.height;
+
+  // Player
+  const player={x:80,y:350,w:36,h:56,vx:0,vy:0,onGround:false,facing:1,lives:3,invUntil:0};
+  const gravity=0.9,friction=0.85;
+
+  // Levels (larger) + hazard spikes on level 3 for variety
+  const levels=[
+    {safeStart:80,platforms:[{x:0,y:460,w:900,h:60},{x:160,y:380,w:180,h:18},{x:360,y:320,w:180,h:18},{x:560,y:260,w:160,h:18},{x:760,y:200,w:140,h:18}],pieces:[{x:220,y:340},{x:420,y:280},{x:620,y:220},{x:760,y:160},{x:480,y:420}]},
+    {safeStart:80,platforms:[{x:0,y:480,w:900,h:60},{x:120,y:420,w:200,h:18},{x:360,y:360,w:160,h:18},{x:560,y:300,w:140,h:18},{x:720,y:240,w:140,h:18}],pieces:[{x:160,y:380},{x:380,y:320},{x:600,y:260},{x:740,y:200},{x:440,y:440}]},
+    {safeStart:80,platforms:[{x:0,y:500,w:900,h:60},{x:80,y:440,w:140,h:18},{x:240,y:380,w:140,h:18},{x:420,y:340,w:160,h:18},{x:600,y:300,w:160,h:18},{x:760,y:240,w:120,h:18}],pieces:[{x:120,y:420},{x:300,y:360},{x:500,y:320},{x:680,y:280},{x:820,y:200}],hazards:[{x:500,y:480,w:40,h:20},{x:720,y:480,w:40,h:20}]}
+  ];
+
+  let currentLevel=0,levelsUnlocked=1,platforms=[],pieces=[];let finished=false;const music=document.getElementById('music');
+  // Ensure music does NOT loop and will play fully
+  music.loop=false;music.onended = ()=>{ /* do nothing, allow it to finish */ };
+
+  function resetPlayerTo(levelIdx){player.x=levels[levelIdx].safeStart;player.y=300;player.vx=0;player.vy=0;player.onGround=false;player.invUntil=Date.now()+600;}
+  function loadLevel(n){currentLevel=n;platforms=JSON.parse(JSON.stringify(levels[n].platforms));pieces=levels[n].pieces.map(p=>({...p,collected:false}));resetPlayerTo(n);finished=false;updateHUD();}
+
+  function updateHUD(){document.getElementById('levelNum').textContent=currentLevel+1;document.getElementById('col').textContent=pieces.filter(p=>p.collected).length;document.getElementById('colGoal').textContent=pieces.length;document.getElementById('lifeDisplay').innerHTML='';for(let i=0;i<player.lives;i++)document.getElementById('lifeDisplay').innerHTML+='❤';}
+
+  // Input
+  const keys={};window.addEventListener('keydown',e=>{keys[e.code]=true;if(e.code==='Space')e.preventDefault();});window.addEventListener('keyup',e=>{keys[e.code]=false;});
+  const leftBtn=document.getElementById('leftBtn'),rightBtn=document.getElementById('rightBtn'),jumpBtn=document.getElementById('jumpBtn');let left=false,right=false,jump=false;
+  function bind(b,on,onup){b.addEventListener('pointerdown',e=>{e.preventDefault();on();});window.addEventListener('pointerup',()=>{onup();});}
+  bind(leftBtn,()=>left=true,()=>left=false);bind(rightBtn,()=>right=true,()=>right=false);bind(jumpBtn,()=>{jump=true;setTimeout(()=>jump=false,160);},()=>{jump=false;});
+
+  // Draw helpers
+  function roundRect(x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();ctx.fill();}
+
+  function draw(){ctx.clearRect(0,0,W,H);
+    // sky
+    const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'#ffdfb8');g.addColorStop(0.45,'#ff9f6b');g.addColorStop(0.75,'#6f9ef0');g.addColorStop(1,'#243964');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    // sun
+    ctx.beginPath();ctx.arc(110,110,56,0,Math.PI*2);ctx.fillStyle='rgba(255,210,130,0.95)';ctx.fill();
+    // clouds
+    const t=Date.now();for(let i=0;i<7;i++){const cx=(i*160 + (t*0.03*(0.5+i*0.1)))%(W+220)-110;const cy=40 + (i%3)*30 + Math.sin((t/1200)+i)*8;ctx.fillStyle='rgba(255,255,255,0.9)';roundRect(cx,cy,120,40,20);}    
+    // hills
+    ctx.fillStyle='rgba(20,30,60,0.12)';ctx.beginPath();ctx.ellipse(300,540,420,160,0,Math.PI,Math.PI*2);ctx.fill();ctx.beginPath();ctx.ellipse(700,540,320,140,0,Math.PI,Math.PI*2);ctx.fill();
+
+    // platforms
+    ctx.fillStyle='#ffdede';for(let p of platforms){roundRect(p.x,p.y,p.w,p.h,8);}    
+    // hazards (spikes)
+    const levelData=levels[currentLevel];if(levelData.hazards){ctx.fillStyle='#333';for(const h of levelData.hazards){ctx.beginPath();ctx.moveTo(h.x,h.y+h.h);ctx.lineTo(h.x+h.w/2,h.y);ctx.lineTo(h.x+h.w,h.y+h.h);ctx.closePath();ctx.fill();}}
+    // pieces
+    for(const s of pieces){if(s.collected)continue;ctx.save();ctx.translate(s.x,s.y);ctx.beginPath();ctx.moveTo(0,-10);ctx.bezierCurveTo(-18,-40,-60,-6,-8,18);ctx.bezierCurveTo(10,28,28,12,28,12);ctx.bezierCurveTo(34,-6,18,-40,0,-10);ctx.closePath();ctx.fillStyle='#ff6b8a';ctx.fill();ctx.restore();}
+
+    // player: nicer boy sprite
+    ctx.fillStyle='rgba(0,0,0,0.18)';ctx.beginPath();ctx.ellipse(player.x+player.w/2,player.y+player.h+10,26,8,0,0,Math.PI*2);ctx.fill();
+    // legs
+    ctx.fillStyle='#2e2e2e';ctx.fillRect(player.x+6,player.y+player.h-8,10,12);ctx.fillRect(player.x+player.w-16,player.y+player.h-8,10,12);
+    // torso
+    ctx.fillStyle='#5aa7f8';roundRect(player.x,player.y+14,player.w,player.h-22,8);
+    // shirt stripe
+    ctx.fillStyle='#fff';ctx.fillRect(player.x+6,player.y+26,player.w-12,8);
+    // head
+    ctx.fillStyle='#ffd2a6';ctx.beginPath();ctx.ellipse(player.x+player.w/2,player.y+12,14,12,0,0,Math.PI*2);ctx.fill();
+    // hair
+    ctx.fillStyle='#2b2b2b';ctx.beginPath();ctx.moveTo(player.x+8,player.y+6);ctx.quadraticCurveTo(player.x+player.w/2,player.y-4,player.x+player.w-8,player.y+6);ctx.fill();
+    // eyes and smile
+    ctx.fillStyle='#111';ctx.fillRect(player.x+10,player.y+10,3,3);ctx.fillRect(player.x+player.w-14,player.y+10,3,3);ctx.fillStyle='#ff9ea6';ctx.beginPath();ctx.ellipse(player.x+player.w/2,player.y+18,6,3,0,0,Math.PI);ctx.fill();
+  }
+
+  function update(){
+    // input
+    if(keys['ArrowLeft']||keys['KeyA']||left)player.vx=Math.max(player.vx-1.3,-6);
+    if(keys['ArrowRight']||keys['KeyD']||right)player.vx=Math.min(player.vx+1.3,6);
+    if(!keys['ArrowLeft']&&!keys['KeyA']&&!keys['ArrowRight']&&!keys['KeyD']&&!left&&!right)player.vx*=friction;
+    if((keys['Space']||keys['ArrowUp']||keys['KeyW']||jump) && player.onGround){player.vy=-15;player.onGround=false;jump=false;}
+
+    // physics
+    player.vy+=gravity;player.x+=player.vx;player.y+=player.vy;
+    if(player.x<0)player.x=0;if(player.x+player.w>W)player.x=W-player.w;
+
+    // check hazards
+    const levelData=levels[currentLevel];if(levelData.hazards){for(const h of levelData.hazards){if(player.x+player.w>h.x && player.x < h.x+h.w && player.y+player.h>h.y){ // hit spike
+            loseLife();break;}}}
+
+    // fall -> lose life
+    if(player.y>H){loseLife();}
+
+    // collisions
+    player.onGround=false;for(const p of platforms){if(player.x+player.w>p.x && player.x < p.x+p.w && player.y+player.h>p.y && player.y+player.h < p.y + p.h + 30 && player.vy>=0){player.y=p.y-player.h;player.vy=0;player.onGround=true;}}
+
+    // collect pieces with safety invulnerability at level start
+    const now=Date.now();for(const s of pieces){if(s.collected)continue;const dx=(player.x+player.w/2)-s.x;const dy=(player.y+player.h/2)-s.y; if(Math.sqrt(dx*dx+dy*dy)<36 && now>player.invUntil){s.collected=true;updateHUD();}}
+
+    // check win
+    if(pieces.length>0 && pieces.every(p=>p.collected))onLevelComplete();
+  }
+
+  function loseLife(){player.lives--;updateHUD();if(player.lives>0){resetPlayerTo(currentLevel);}else{ // show lost card
+      player.lives=0;updateHUD();showLost();}}
+
+  function onLevelComplete(){if(finished)return;finished=true;setTimeout(()=>{finished=false;if(currentLevel<levels.length-1){if(levelsUnlocked<currentLevel+2)levelsUnlocked=currentLevel+2;showLevelComplete();}else{showFinal();}},400);}
+
+  // overlays
+  function hideAll(){document.querySelectorAll('.card').forEach(c=>{c.classList.remove('show');c.style.display='none';});}
+  function refreshMenu(){const list=document.getElementById('levelsList');list.innerHTML='';for(let i=0;i<levels.length;i++){const b=document.createElement('button');b.className='levelBtn';b.textContent='Уровень '+(i+1);b.disabled=i+1>levelsUnlocked; b.style.opacity=i+1>levelsUnlocked?0.45:1; b.onclick=()=>{hideAll();loadLevel(i);};list.appendChild(b);} }
+
+  function showMenu(){hideAll();refreshMenu();const c=document.getElementById('menuCard');c.style.display='block';setTimeout(()=>c.classList.add('show'),10);}
+  function showLevelComplete(){hideAll();const c=document.getElementById('levelCompleteCard');c.style.display='block';setTimeout(()=>c.classList.add('show'),10);}  
+  function showLost(){hideAll();const c=document.getElementById('lostCard');c.style.display='block';setTimeout(()=>c.classList.add('show'),10);}
+  function showFinal(){hideAll();const c=document.getElementById('finalCard');c.style.display='block';setTimeout(()=>{c.classList.add('show');},10);try{music.currentTime=0;music.play().catch(()=>{});}catch(e){}}
+
+  // UI bindings
+  document.getElementById('startBtn').onclick=()=>{levelsUnlocked=1;player.lives=3;updateHUD();hideAll();loadLevel(0);};
+  document.getElementById('nextBtn').onclick=()=>{hideAll();loadLevel(currentLevel+1);};
+  document.getElementById('backToMenu').onclick=()=>{showMenu();};
+  document.getElementById('retryBtn').onclick=()=>{player.lives=3;updateHUD();hideAll();loadLevel(currentLevel);};
+  document.getElementById('lostToMenu').onclick=()=>{player.lives=3;updateHUD();showMenu();};
+  document.getElementById('replayBtn').onclick=()=>{player.lives=3;levelsUnlocked=1;updateHUD();showMenu();music.pause();music.currentTime=0;};
+
+  // main loop
+  function loop(){update();draw();requestAnimationFrame(loop);} loadLevel(0);showMenu();loop();
+  </script>
+</body>
+</html>
